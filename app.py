@@ -33,10 +33,12 @@ class StreamPlayerWithAuth:
         self.base_url = self.extract_base_url(stream_url)
         self.query_params = self.extract_query_params(stream_url)
         self.download_folder = f"temp_videos/{stream_id}"
-        self.is_mpd = stream_url.lower().endswith('.mpd')
-        self.is_m3u8 = stream_url.lower().endswith('.m3u8')
+        # Check if URL has .mpd or .m3u8 extension, or contains those strings
+        self.is_mpd = '.mpd' in stream_url.lower()
+        self.is_m3u8 = '.m3u8' in stream_url.lower()
         self.parsed_manifest = None
-        self.cache = {}  # Cache for segment responses
+        self.cache = {}  # Cache for segment responses and URL mappings
+        self.original_query_string = urllib.parse.urlparse(stream_url).query
         
         # MPD namespace for parsing (only used for MPD files)
         self.ns = {'mpd': 'urn:mpeg:dash:schema:mpd:2011'}
@@ -54,8 +56,12 @@ class StreamPlayerWithAuth:
         # Extract query parameters from URL
         if '?' not in url:
             return {}
-        query_string = url.split('?', 1)[1]
-        return dict(param.split('=') for param in query_string.split('&') if '=' in param)
+        
+        # Use urllib to properly parse complex query parameters
+        parsed_url = urllib.parse.urlparse(url)
+        # Return the query string as is, rather than splitting into parameters
+        # This preserves the original formatting of complex signed URLs
+        return urllib.parse.parse_qs(parsed_url.query)
     
     def add_auth_params_to_url(self, url):
         # Add authentication parameters to URL
@@ -64,9 +70,18 @@ class StreamPlayerWithAuth:
         else:
             base_url = url
             
-        # URL encode parameters as they might contain special characters
-        query_params = urllib.parse.urlencode(self.query_params)
-        return f"{base_url}?{query_params}"
+        # For CloudFront and other CDNs with specific signed URL formats,
+        # we need to ensure we keep all query parameters from the original URL
+        if self.query_params:
+            # URL encode parameters as they might contain special characters
+            query_params = urllib.parse.urlencode(self.query_params, safe='~')
+            return f"{base_url}?{query_params}"
+        else:
+            # If no query params were extracted initially, try to get them from the original URL
+            original_query = urllib.parse.urlparse(self.stream_url).query
+            if original_query:
+                return f"{base_url}?{original_query}"
+            return base_url
     
     def fetch_manifest(self):
         """Download and parse manifest file (MPD or M3U8)"""
@@ -145,40 +160,69 @@ class StreamPlayerWithAuth:
                 m3u8_content = f.read()
             
             # Get the base URL of the M3U8 file (everything before the last slash)
-            base_url = os.path.dirname(self.stream_url)
+            parsed_url = urllib.parse.urlparse(self.stream_url)
+            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{os.path.dirname(parsed_url.path)}"
+            
+            # Get the token to embed in the proxy URLs
+            token = self.stream_id
             
             # Process lines in the M3U8 file
             modified_lines = []
             for line in m3u8_content.splitlines():
                 # Skip comments and directives
                 if line.startswith('#'):
-                    # Check for EXT-X-STREAM-INF (for master playlists) or EXT-X-KEY (for encryption)
-                    if '#EXT-X-STREAM-INF:' in line or '#EXT-X-KEY:' in line:
-                        # Replace URIs in EXT-X-KEY directives
-                        if '#EXT-X-KEY:' in line and 'URI="' in line:
-                            parts = line.split('URI="')
-                            if len(parts) > 1:
-                                uri_part = parts[1].split('"')[0]
-                                # Keep local paths as is, convert absolute URLs to paths
-                                if uri_part.startswith('http'):
-                                    # Extract segment name
-                                    segment_name = uri_part.split('/')[-1]
-                                    line = f"{parts[0]}URI=\"{segment_name}\""
-                    modified_lines.append(line)
-                # Process URLs
+                    # Handle playlists in master m3u8 files
+                    if '#EXT-X-STREAM-INF:' in line:
+                        modified_lines.append(line)
+                    # Handle encryption keys
+                    elif '#EXT-X-KEY:' in line and 'URI="' in line:
+                        parts = line.split('URI="')
+                        if len(parts) > 1:
+                            uri_part = parts[1].split('"')[0]
+                            # Keep local paths as is, modify URLs for proxy
+                            if uri_part.startswith('http'):
+                                # Extract segment name
+                                segment_name = uri_part.split('/')[-1]
+                                line = f"{parts[0]}URI=\"{segment_name}\""
+                        modified_lines.append(line)
+                    else:
+                        modified_lines.append(line)
+                # Process URLs for playlists and segments
                 elif line and not line.startswith('#'):
+                    # Save original URLs in comment for debugging
+                    modified_lines.append(f"#ORIGINAL-URL: {line}")
+                    
                     # Handle absolute URLs
                     if line.startswith('http'):
                         # Extract segment name
                         segment_name = line.split('/')[-1]
+                        # Save mapping for proxy
+                        self.cache[segment_name] = {'original_url': line}
                         modified_lines.append(segment_name)
-                    # Handle relative URLs
+                    # Handle relative URLs that are sub-playlists or segments
                     elif not line.startswith('/'):
-                        modified_lines.append(line)
+                        # For relative path segments/playlists
+                        if '/' in line:  # Has subdirectory
+                            segment_name = line.split('/')[-1]
+                            # Build the full URL
+                            full_url = f"{base_url}/{line}"
+                            # Save mapping for proxy
+                            self.cache[segment_name] = {'original_url': full_url}
+                            modified_lines.append(segment_name)
+                        else:
+                            # For simple relative paths
+                            full_url = f"{base_url}/{line}"
+                            # Save mapping for proxy
+                            self.cache[line] = {'original_url': full_url}
+                            modified_lines.append(line)
                     # Handle absolute paths
                     else:
                         # Extract segment name
                         segment_name = line.split('/')[-1]
+                        # Build the full URL
+                        full_url = f"{parsed_url.scheme}://{parsed_url.netloc}{line}"
+                        # Save mapping for proxy
+                        self.cache[segment_name] = {'original_url': full_url}
                         modified_lines.append(segment_name)
             
             # Join lines and save modified M3U8
@@ -192,40 +236,94 @@ class StreamPlayerWithAuth:
     
     def get_segment(self, path):
         """Fetch a segment with authentication parameters"""
-        # Check if segment is in cache
-        if path in self.cache:
+        # Check if segment is in content cache
+        if path in self.cache and 'content' in self.cache[path]:
             logging.info(f"Serving segment from cache: {path}")
             return self.cache[path]
         
         try:
-            # Extract domain and path from the stream URL
-            url_parts = urllib.parse.urlparse(self.stream_url)
-            domain = f"{url_parts.scheme}://{url_parts.netloc}"
-            
-            # Extract base path (up to the directory containing the manifest file)
-            base_path = os.path.dirname(url_parts.path)
-            
-            # Construct full URL
-            full_url = f"{domain}{base_path}/{path}"
-            authenticated_url = self.add_auth_params_to_url(full_url)
-            
-            logging.info(f"Proxy: Request for {path}")
-            logging.info(f"Redirecting to URL: {authenticated_url}")
-            
-            response = requests.get(authenticated_url)
-            response.raise_for_status()
-            
-            # Cache the response (only for small segments to avoid memory issues)
-            if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
-                self.cache[path] = {
+            # If we have a mapping for this segment/playlist from previous processing
+            if path in self.cache and 'original_url' in self.cache[path]:
+                original_url = self.cache[path]['original_url']
+                authenticated_url = self.add_auth_params_to_url(original_url)
+                
+                logging.info(f"Proxy: Request for mapped path {path}")
+                logging.info(f"Redirecting to URL: {authenticated_url}")
+                
+                response = requests.get(authenticated_url)
+                response.raise_for_status()
+                
+                # For M3U8 playlists, process them to update URLs
+                if path.endswith('.m3u8'):
+                    content_type = 'application/vnd.apple.mpegurl'
+                    
+                    # Create a unique path for this sub-playlist
+                    sub_playlist_path = os.path.join(self.download_folder, path)
+                    os.makedirs(os.path.dirname(sub_playlist_path), exist_ok=True)
+                    
+                    # Save the playlist
+                    with open(sub_playlist_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    # Modify the sub-playlist
+                    self.modify_m3u8_for_proxy(sub_playlist_path)
+                    
+                    # Read back the modified playlist
+                    with open(sub_playlist_path, 'rb') as f:
+                        modified_content = f.read()
+                    
+                    # Cache the processed content
+                    self.cache[path] = {
+                        'content': modified_content,
+                        'content_type': content_type
+                    }
+                    
+                    return {
+                        'content': modified_content,
+                        'content_type': content_type
+                    }
+                else:
+                    # For regular segments, just cache and return
+                    content_type = response.headers.get('Content-Type', 'application/octet-stream')
+                    
+                    # Cache the response (only for small segments to avoid memory issues)
+                    if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
+                        self.cache[path] = {
+                            'content': response.content,
+                            'content_type': content_type
+                        }
+                    
+                    return {
+                        'content': response.content,
+                        'content_type': content_type
+                    }
+            else:
+                # Fall back to the old approach for backward compatibility
+                url_parts = urllib.parse.urlparse(self.stream_url)
+                domain = f"{url_parts.scheme}://{url_parts.netloc}"
+                base_path = os.path.dirname(url_parts.path)
+                
+                # Construct full URL
+                full_url = f"{domain}{base_path}/{path}"
+                authenticated_url = self.add_auth_params_to_url(full_url)
+                
+                logging.info(f"Proxy: Request for unmapped path {path}")
+                logging.info(f"Redirecting to URL: {authenticated_url}")
+                
+                response = requests.get(authenticated_url)
+                response.raise_for_status()
+                
+                # Cache the response (only for small segments to avoid memory issues)
+                if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
+                    self.cache[path] = {
+                        'content': response.content,
+                        'content_type': response.headers.get('Content-Type', 'application/octet-stream')
+                    }
+                
+                return {
                     'content': response.content,
                     'content_type': response.headers.get('Content-Type', 'application/octet-stream')
                 }
-            
-            return {
-                'content': response.content,
-                'content_type': response.headers.get('Content-Type', 'application/octet-stream')
-            }
         except Exception as e:
             logging.error(f"Error fetching segment: {e}")
             return None
@@ -292,9 +390,13 @@ def create_stream():
     stream_url = data['stream_url']
     is_live = data.get('is_live', False)
     
-    # Validate URL format (must end with .mpd or .m3u8)
-    if not (stream_url.lower().endswith('.mpd') or stream_url.lower().endswith('.m3u8')):
-        return jsonify({'error': 'URL must be an MPD or M3U8 manifest'}), 400
+    # Check if URL has .mpd or .m3u8 extension, or contains those strings
+    is_mpd = '.mpd' in stream_url.lower()
+    is_m3u8 = '.m3u8' in stream_url.lower()
+    
+    # Validate URL format
+    if not (is_mpd or is_m3u8):
+        return jsonify({'error': 'URL must contain MPD or M3U8 manifest reference'}), 400
     
     # Create JWT token
     token, stream_id = create_jwt_token(stream_url)
@@ -314,7 +416,7 @@ def create_stream():
     }
     
     # Return stream information
-    manifest_path = "manifest.mpd" if stream_url.lower().endswith('.mpd') else "playlist.m3u8"
+    manifest_path = "manifest.mpd" if is_mpd else "playlist.m3u8"
     
     return jsonify({
         'token': token,
@@ -322,7 +424,7 @@ def create_stream():
         'manifest_url': f"/api/stream/{token}/{manifest_path}",
         'expires_at': int(time.time()) + JWT_EXPIRY,
         'is_live': is_live,
-        'format': 'DASH' if stream_url.lower().endswith('.mpd') else 'HLS'
+        'format': 'DASH' if is_mpd else 'HLS'
     })
 
 
