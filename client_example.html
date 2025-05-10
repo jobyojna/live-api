@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DASH Player Client Example</title>
+    <script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            font-family: monospace;
+        }
+        .buttons {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #videoContainer {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px 0;
+        }
+        .video-player {
+            width: 100%;
+            background: #000;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            overflow: auto;
+            max-height: 300px;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            background: #e7f7e7;
+            border-left: 5px solid #4CAF50;
+        }
+        .error {
+            background: #f7e7e7;
+            border-left: 5px solid #CF4F40;
+        }
+        .stream-list {
+            margin-top: 20px;
+        }
+        .stream-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>DASH Player Client Example</h1>
+    
+    <div class="form-group">
+        <label for="apiUrl">API URL:</label>
+        <input type="text" id="apiUrl" value="http://localhost:8000" placeholder="Enter API URL">
+    </div>
+    
+    <div class="form-group">
+        <label for="mpdUrl">MPD URL with Auth Params:</label>
+        <textarea id="mpdUrl" rows="3" placeholder="Enter MPD URL with authentication parameters"></textarea>
+    </div>
+    
+    <div class="buttons">
+        <button id="createStream">Create Stream</button>
+        <button id="clearData">Clear Data</button>
+    </div>
+    
+    <div id="status" style="display: none;"></div>
+    
+    <div id="streamInfo" style="display: none;">
+        <h2>Stream Information</h2>
+        <pre id="streamInfoJson"></pre>
+        
+        <div id="videoContainer">
+            <h2>Video Player</h2>
+            <video id="videoPlayer" class="video-player" controls></video>
+        </div>
+    </div>
+    
+    <div class="stream-list">
+        <h2>Saved Streams</h2>
+        <div id="savedStreams"></div>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const apiUrlInput = document.getElementById('apiUrl');
+        const mpdUrlInput = document.getElementById('mpdUrl');
+        const createStreamButton = document.getElementById('createStream');
+        const clearDataButton = document.getElementById('clearData');
+        const statusDiv = document.getElementById('status');
+        const streamInfoDiv = document.getElementById('streamInfo');
+        const streamInfoJson = document.getElementById('streamInfoJson');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const savedStreamsDiv = document.getElementById('savedStreams');
+        
+        // Initialize dashjs player
+        let player = null;
+        
+        // Load saved streams from localStorage
+        let savedStreams = JSON.parse(localStorage.getItem('dashStreams') || '[]');
+        
+        // Show status message
+        function showStatus(message, isError = false) {
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            statusDiv.className = isError ? 'status error' : 'status';
+            
+            // Hide after 5 seconds if not an error
+            if (!isError) {
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        // Create a new stream
+        async function createStream() {
+            const apiUrl = apiUrlInput.value.trim();
+            const mpdUrl = mpdUrlInput.value.trim();
+            
+            if (!apiUrl || !mpdUrl) {
+                showStatus('Please enter both API URL and MPD URL', true);
+                return;
+            }
+            
+            createStreamButton.disabled = true;
+            showStatus('Creating stream...');
+            
+            try {
+                const response = await fetch(`${apiUrl}/api/create_stream`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ mpd_url: mpdUrl })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to create stream');
+                }
+                
+                // Save the stream info
+                const streamData = {
+                    id: data.stream_id,
+                    token: data.token,
+                    apiUrl: apiUrl,
+                    mpdUrl: mpdUrl,
+                    manifestUrl: `${apiUrl}${data.manifest_url}`,
+                    expiresAt: data.expires_at,
+                    createdAt: Date.now()
+                };
+                
+                // Add to saved streams
+                savedStreams.unshift(streamData);
+                localStorage.setItem('dashStreams', JSON.stringify(savedStreams));
+                
+                // Display stream info
+                displayStreamInfo(streamData);
+                
+                // Update saved streams list
+                updateSavedStreamsList();
+                
+                showStatus('Stream created successfully!');
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, true);
+            } finally {
+                createStreamButton.disabled = false;
+            }
+        }
+        
+        // Display stream info and initialize player
+        function displayStreamInfo(streamData) {
+            // Display stream info
+            streamInfoJson.textContent = JSON.stringify(streamData, null, 2);
+            streamInfoDiv.style.display = 'block';
+            
+            // Initialize player
+            if (player) {
+                player.destroy();
+            }
+            
+            player = dashjs.MediaPlayer().create();
+            player.initialize(videoPlayer, streamData.manifestUrl, true);
+        }
+        
+        // Update the list of saved streams
+        function updateSavedStreamsList() {
+            savedStreamsDiv.innerHTML = '';
+            
+            if (savedStreams.length === 0) {
+                savedStreamsDiv.innerHTML = '<p>No saved streams</p>';
+                return;
+            }
+            
+            // Remove expired streams
+            const now = Date.now() / 1000;
+            savedStreams = savedStreams.filter(stream => stream.expiresAt > now);
+            localStorage.setItem('dashStreams', JSON.stringify(savedStreams));
+            
+            // Display streams
+            savedStreams.forEach((stream, index) => {
+                const streamItem = document.createElement('div');
+                streamItem.className = 'stream-item';
+                
+                const expiresDate = new Date(stream.expiresAt * 1000).toLocaleString();
+                const createdDate = new Date(stream.createdAt).toLocaleString();
+                
+                streamItem.innerHTML = `
+                    <h3>Stream ${index + 1}</h3>
+                    <p><strong>ID:</strong> ${stream.id}</p>
+                    <p><strong>Created:</strong> ${createdDate}</p>
+                    <p><strong>Expires:</strong> ${expiresDate}</p>
+                    <button class="load-stream" data-index="${index}">Load Stream</button>
+                    <button class="remove-stream" data-index="${index}">Remove</button>
+                `;
+                
+                savedStreamsDiv.appendChild(streamItem);
+            });
+            
+            // Add event listeners for stream actions
+            document.querySelectorAll('.load-stream').forEach(button => {
+                button.addEventListener('click', () => {
+                    const index = parseInt(button.getAttribute('data-index'));
+                    displayStreamInfo(savedStreams[index]);
+                });
+            });
+            
+            document.querySelectorAll('.remove-stream').forEach(button => {
+                button.addEventListener('click', () => {
+                    const index = parseInt(button.getAttribute('data-index'));
+                    savedStreams.splice(index, 1);
+                    localStorage.setItem('dashStreams', JSON.stringify(savedStreams));
+                    updateSavedStreamsList();
+                });
+            });
+        }
+        
+        // Clear all data
+        function clearData() {
+            localStorage.removeItem('dashStreams');
+            savedStreams = [];
+            updateSavedStreamsList();
+            streamInfoDiv.style.display = 'none';
+            mpdUrlInput.value = '';
+            showStatus('All data cleared');
+        }
+        
+        // Event listeners
+        createStreamButton.addEventListener('click', createStream);
+        clearDataButton.addEventListener('click', clearData);
+        
+        // Initialize
+        updateSavedStreamsList();
+    </script>
+</body>
+</html>
