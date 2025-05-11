@@ -18,7 +18,7 @@ CORS(app)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # JWT Secret Key - Change this to a secure secret in production
-JWT_SECRET = "khachrajwt"
+JWT_SECRET = "your-secret-key-change-this"
 # How long the JWT token is valid (in seconds)
 JWT_EXPIRY = 3600 * 24  # 24 hours
 
