@@ -368,7 +368,7 @@ def get_segment_or_playlist(stream_id, segment_path):
     player = active_streams[stream_id]
     
     # Handle HLS key requests
-    if segment_path.endswith('enc.key'):
+    if 'get-hls-key' in segment_path:
         # Extract videoKey from the request URL
         video_key = request.args.get('videoKey')
         if not video_key:
