@@ -215,6 +215,20 @@ class HLSPlayerWithAuth:
             logging.error(f"Error getting M3U8 content: {e}")
             return None
     
+    def get_hls_key(self, key_url, authorization):
+        """Fetch and process HLS encryption key"""
+        try:
+            headers = {}
+            if authorization:
+                headers['Authorization'] = authorization
+            
+            response = requests.get(key_url, headers=headers)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            logging.error(f"Error fetching HLS key: {e}")
+            return None
+
     def get_segment(self, path):
         """Fetch a segment with authentication parameters"""
         # Check if segment is in cache
@@ -352,6 +366,15 @@ def get_segment_or_playlist(stream_id, segment_path):
         return jsonify({'error': 'Stream not found'}), 404
     
     player = active_streams[stream_id]
+    
+    # Handle HLS key requests
+    if segment_path.endswith('enc.key'):
+        authorization = request.headers.get('Authorization')
+        key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={stream_id}&key=enc.key"
+        key_content = player.get_hls_key(key_url, authorization)
+        if key_content:
+            return Response(key_content, mimetype='application/octet-stream')
+        return jsonify({'error': 'Failed to fetch encryption key'}), 500
     
     # Check if this is an M3U8 file (sub-playlist)
     if segment_path.endswith('.m3u8'):
