@@ -370,11 +370,21 @@ def get_segment_or_playlist(stream_id, segment_path):
     # Handle HLS key requests
     if segment_path.endswith('enc.key'):
         authorization = request.headers.get('Authorization')
-        key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={stream_id}&key=enc.key"
-        key_content = player.get_hls_key(key_url, authorization)
-        if key_content:
-            return Response(key_content, mimetype='application/octet-stream')
-        return jsonify({'error': 'Failed to fetch encryption key'}), 500
+        if authorization:
+            # Add authorization as a URL parameter
+            key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={stream_id}&key=enc.key&authorization={authorization}"
+            key_content = player.get_hls_key(key_url, None)
+            if key_content:
+                # Decode the response if needed
+                try:
+                    response_json = json.loads(key_content)
+                    if 'data' in response_json:
+                        return Response(response_json['data'], mimetype='application/octet-stream')
+                except:
+                    # If not JSON or no 'data' field, return as-is
+                    return Response(key_content, mimetype='application/octet-stream')
+            return jsonify({'error': 'Failed to fetch encryption key'}), 500
+        return jsonify({'error': 'Authorization header is required'}), 401
     
     # Check if this is an M3U8 file (sub-playlist)
     if segment_path.endswith('.m3u8'):
