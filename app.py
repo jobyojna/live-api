@@ -389,19 +389,11 @@ def get_segment_or_playlist(stream_id, segment_path):
             response = requests.get(key_url, headers=headers)
             response.raise_for_status()
             
-            # Parse response
-            response_data = response.json()
-            if 'data' in response_data:
-                # Base64 डिकोड करें एनक्रिप्टेड की को
-                import base64
-                try:
-                    decoded_key = base64.b64decode(response_data['data'])
-                    return Response(decoded_key, mimetype='application/octet-stream')
-                except Exception as e:
-                    logging.error(f"Error decoding key data: {str(e)}")
-                    return jsonify({'error': 'Failed to decode encryption key'}), 500
+            # सीधे बाइनरी डेटा के रूप में रिस्पांस को प्रोसेस करें
+            if response.content:
+                return Response(response.content, mimetype='application/octet-stream')
             else:
-                return jsonify({'error': 'Invalid response format from key server'}), 500
+                return jsonify({'error': 'Empty response from key server'}), 500
                 
         except requests.exceptions.RequestException as e:
             logging.error(f"Error fetching encryption key: {str(e)}")
