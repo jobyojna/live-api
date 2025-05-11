@@ -377,8 +377,8 @@ def get_segment_or_playlist(stream_id, segment_path):
         # Use the fixed authorization token for penpencil API
         auth_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NDc0ODY3OTMuNTY4LCJkYXRhIjp7Il9pZCI6IjY2NjQwNDYyYzg0NzgzZDM4NjMxMjMzNyIsInVzZXJuYW1lIjoiOTY2ODQyNTI1NyIsImZpcnN0TmFtZSI6IlB1bmFtIFByYWhhcmFqIiwibGFzdE5hbWUiOiJUcmlwYXRoeSAiLCJvcmdhbml6YXRpb24iOnsiX2lkIjoiNWViMzkzZWU5NWZhYjc0NjhhNzlkMTg5Iiwid2Vic2l0ZSI6InBoeXNpY3N3YWxsYWguY29tIiwibmFtZSI6IlBoeXNpY3N3YWxsYWgifSwiZW1haWwiOiJwdW5hbXByYWhhcmFqQGdtYWlsLmNvbSIsInJvbGVzIjpbIjViMjdiZDk2NTg0MmY5NTBhNzc4YzZlZiJdLCJjb3VudHJ5R3JvdXAiOiJJTiIsInR5cGUiOiJVU0VSIn0sImlhdCI6MTc0Njg4MTk5M30.nxRAMtZWVLp_9IWgygfh4ID7N0ipx6PX7sLniC9SL3A"
         
-        # Construct the penpencil API URL
-        key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={video_key}&key=enc.key"
+        # Construct the penpencil API URL with authorization parameter
+        key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={video_key}&key=enc.key&authorization={auth_token}"
         
         try:
             # Make request to penpencil API
