@@ -7,7 +7,6 @@ import urllib.parse
 import os
 import time
 import logging
-from xml.etree import ElementTree
 import re
 import threading
 import uuid
@@ -19,29 +18,21 @@ CORS(app)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # JWT Secret Key - Change this to a secure secret in production
-JWT_SECRET = "your-secret-key-change-this"
+JWT_SECRET = "khachrajwt"
 # How long the JWT token is valid (in seconds)
 JWT_EXPIRY = 3600 * 24  # 24 hours
 
 # Store active streams with their details
 active_streams = {}
 
-class StreamPlayerWithAuth:
-    def __init__(self, stream_url, stream_id):
-        self.stream_url = stream_url
+class HLSPlayerWithAuth:
+    def __init__(self, m3u8_url, stream_id):
+        self.m3u8_url = m3u8_url
         self.stream_id = stream_id
-        self.base_url = self.extract_base_url(stream_url)
-        self.query_params = self.extract_query_params(stream_url)
-        self.download_folder = f"temp_videos/{stream_id}"
-        # Check if URL has .mpd or .m3u8 extension, or contains those strings
-        self.is_mpd = '.mpd' in stream_url.lower()
-        self.is_m3u8 = '.m3u8' in stream_url.lower()
-        self.parsed_manifest = None
-        self.cache = {}  # Cache for segment responses and URL mappings
-        self.original_query_string = urllib.parse.urlparse(stream_url).query
-        
-        # MPD namespace for parsing (only used for MPD files)
-        self.ns = {'mpd': 'urn:mpeg:dash:schema:mpd:2011'}
+        self.base_url = self.extract_base_url(m3u8_url)
+        self.query_params = self.extract_query_params(m3u8_url)
+        self.download_folder = f"temp_hls/{stream_id}"
+        self.cache = {}  # Cache for segment responses
         
         # Create directory if it doesn't exist
         if not os.path.exists(self.download_folder):
@@ -50,18 +41,25 @@ class StreamPlayerWithAuth:
     def extract_base_url(self, url):
         # Extract base part from URL (without query parameters)
         parsed_url = urllib.parse.urlparse(url)
-        return f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+        path_parts = parsed_url.path.split('/')
+        if path_parts and path_parts[-1]:
+            # Remove the filename from the path
+            path = '/'.join(path_parts[:-1]) + '/'
+        else:
+            path = parsed_url.path
+        return f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
     
     def extract_query_params(self, url):
         # Extract query parameters from URL
         if '?' not in url:
             return {}
-        
-        # Use urllib to properly parse complex query parameters
-        parsed_url = urllib.parse.urlparse(url)
-        # Return the query string as is, rather than splitting into parameters
-        # This preserves the original formatting of complex signed URLs
-        return urllib.parse.parse_qs(parsed_url.query)
+        query_string = url.split('?', 1)[1]
+        params = {}
+        for param in query_string.split('&'):
+            if '=' in param:
+                key, value = param.split('=', 1)
+                params[key] = value
+        return params
     
     def add_auth_params_to_url(self, url):
         # Add authentication parameters to URL
@@ -70,298 +68,207 @@ class StreamPlayerWithAuth:
         else:
             base_url = url
             
-        # For CloudFront and other CDNs with specific signed URL formats,
-        # we need to ensure we keep all query parameters from the original URL
-        if self.query_params:
-            # URL encode parameters as they might contain special characters
-            query_params = urllib.parse.urlencode(self.query_params, safe='~')
-            return f"{base_url}?{query_params}"
-        else:
-            # If no query params were extracted initially, try to get them from the original URL
-            original_query = urllib.parse.urlparse(self.stream_url).query
-            if original_query:
-                return f"{base_url}?{original_query}"
-            return base_url
+        # URL encode parameters as they might contain special characters
+        query_params = urllib.parse.urlencode(self.query_params)
+        return f"{base_url}?{query_params}"
     
-    def fetch_manifest(self):
-        """Download and parse manifest file (MPD or M3U8)"""
-        logging.info(f"Downloading manifest from URL: {self.stream_url}")
+    def fetch_m3u8(self):
+        """Download and process M3U8 playlist file"""
+        logging.info(f"Downloading manifest from M3U8 URL: {self.m3u8_url}")
         
         try:
-            response = requests.get(self.stream_url)
+            response = requests.get(self.m3u8_url)
             response.raise_for_status()
             
-            if self.is_mpd:
-                # Save MPD file
-                manifest_path = os.path.join(self.download_folder, "manifest.mpd")
-                with open(manifest_path, 'wb') as f:
-                    f.write(response.content)
-                
-                # Parse XML for MPD
-                self.parsed_manifest = ElementTree.fromstring(response.content)
-                
-                # Modify MPD for proxy playback
-                self.modify_mpd_for_proxy()
-                
-                return True
+            # Save original M3U8 file
+            original_m3u8_path = os.path.join(self.download_folder, "original.m3u8")
+            with open(original_m3u8_path, 'wb') as f:
+                f.write(response.content)
             
-            elif self.is_m3u8:
-                # Save M3U8 file
-                manifest_path = os.path.join(self.download_folder, "playlist.m3u8")
-                with open(manifest_path, 'wb') as f:
-                    f.write(response.content)
-                
-                # For M3U8, we store the content as string
-                self.parsed_manifest = response.text
-                
-                # Modify M3U8 for proxy playback
-                self.modify_m3u8_for_proxy(manifest_path)
-                
-                return True
-                
-            else:
-                logging.error(f"Unsupported manifest format: {self.stream_url}")
-                return False
-                
+            # Create modified M3U8 for proxy playback
+            self.modify_m3u8_for_proxy(response.content.decode('utf-8'))
+            
+            return True
         except Exception as e:
-            logging.error(f"Error downloading manifest file: {e}")
+            logging.error(f"Error downloading M3U8 file: {e}")
             return False
     
-    def modify_mpd_for_proxy(self):
-        """Modify MPD file for proxy playback"""
-        if not self.parsed_manifest:
-            logging.error("Please fetch MPD file first")
-            return
-        
-        mpd_path = os.path.join(self.download_folder, "manifest.mpd")
-        
-        try:
-            # Read MPD from file
-            with open(mpd_path, 'r', encoding='utf-8') as f:
-                mpd_content = f.read()
-            
-            # Replace absolute URLs with relative paths that point to our API
-            mpd_content = re.sub(r'(initialization|media)="https?://[^/]+/[^"]*?/([^"]+)"', 
-                                r'\1="\2"', mpd_content)
-            
-            # Save modified MPD
-            with open(mpd_path, 'w', encoding='utf-8') as f:
-                f.write(mpd_content)
-            
-            logging.info(f"MPD file successfully modified for proxy playback: {mpd_path}")
-        except Exception as e:
-            logging.error(f"Error modifying MPD file: {e}")
-    
-    def modify_m3u8_for_proxy(self, m3u8_path):
+    def modify_m3u8_for_proxy(self, content):
         """Modify M3U8 file for proxy playback"""
+        modified_content = content
+        
+        # Get the filename from the original URL
+        m3u8_filename = self.m3u8_url.split('/')[-1].split('?')[0]
+        
         try:
-            # Read M3U8 from file
-            with open(m3u8_path, 'r', encoding='utf-8') as f:
-                m3u8_content = f.read()
-            
-            # Get the base URL of the M3U8 file (everything before the last slash)
-            parsed_url = urllib.parse.urlparse(self.stream_url)
-            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{os.path.dirname(parsed_url.path)}"
-            
-            # Get the token to embed in the proxy URLs
-            token = self.stream_id
-            
-            # Process lines in the M3U8 file
+            # Process line by line
+            lines = content.splitlines()
             modified_lines = []
-            for line in m3u8_content.splitlines():
-                # Skip comments and directives
+            
+            for line in lines:
                 if line.startswith('#'):
-                    # Handle playlists in master m3u8 files
-                    if '#EXT-X-STREAM-INF:' in line:
+                    # Handle directives with URLs
+                    if '#EXT-X-STREAM-INF' in line:
                         modified_lines.append(line)
-                    # Handle encryption keys
-                    elif '#EXT-X-KEY:' in line and 'URI="' in line:
-                        parts = line.split('URI="')
-                        if len(parts) > 1:
-                            uri_part = parts[1].split('"')[0]
-                            # Keep local paths as is, modify URLs for proxy
-                            if uri_part.startswith('http'):
-                                # Extract segment name
-                                segment_name = uri_part.split('/')[-1]
-                                line = f"{parts[0]}URI=\"{segment_name}\""
-                        modified_lines.append(line)
-                    else:
-                        modified_lines.append(line)
-                # Process URLs for playlists and segments
-                elif line and not line.startswith('#'):
-                    # Save original URLs in comment for debugging
-                    modified_lines.append(f"#ORIGINAL-URL: {line}")
-                    
-                    # Handle absolute URLs
-                    if line.startswith('http'):
-                        # Extract segment name
-                        segment_name = line.split('/')[-1]
-                        # Save mapping for proxy
-                        self.cache[segment_name] = {'original_url': line}
-                        modified_lines.append(segment_name)
-                    # Handle relative URLs that are sub-playlists or segments
-                    elif not line.startswith('/'):
-                        # For relative path segments/playlists
-                        if '/' in line:  # Has subdirectory
-                            segment_name = line.split('/')[-1]
-                            # Build the full URL
-                            full_url = f"{base_url}/{line}"
-                            # Save mapping for proxy
-                            self.cache[segment_name] = {'original_url': full_url}
-                            modified_lines.append(segment_name)
+                    elif '#EXT-X-KEY' in line and 'URI=' in line:
+                        # Replace encryption key URLs
+                        pattern = r'URI="([^"]+)"'
+                        match = re.search(pattern, line)
+                        if match:
+                            original_url = match.group(1)
+                            # Handle relative or absolute URLs
+                            if not original_url.startswith('http'):
+                                if original_url.startswith('/'):
+                                    # Absolute path from domain root
+                                    domain = '/'.join(self.base_url.split('/')[:3])  # http(s)://domain.com
+                                    full_url = domain + original_url
+                                else:
+                                    # Relative path
+                                    full_url = self.base_url + original_url
+                            else:
+                                full_url = original_url
+                                
+                            proxy_url = f"/api/stream/{self.stream_id}/{original_url.split('/')[-1]}"
+                            modified_line = line.replace(f'URI="{original_url}"', f'URI="{proxy_url}"')
+                            modified_lines.append(modified_line)
                         else:
-                            # For simple relative paths
-                            full_url = f"{base_url}/{line}"
-                            # Save mapping for proxy
-                            self.cache[line] = {'original_url': full_url}
                             modified_lines.append(line)
-                    # Handle absolute paths
                     else:
-                        # Extract segment name
-                        segment_name = line.split('/')[-1]
-                        # Build the full URL
-                        full_url = f"{parsed_url.scheme}://{parsed_url.netloc}{line}"
-                        # Save mapping for proxy
-                        self.cache[segment_name] = {'original_url': full_url}
-                        modified_lines.append(segment_name)
+                        modified_lines.append(line)
+                elif line.strip() and not line.startswith('#'):
+                    # Handle media playlist or segment URLs
+                    if line.endswith('.m3u8') or '.m3u8?' in line:
+                        # This is a variant playlist
+                        if line.startswith('http'):
+                            # Absolute URL
+                            playlist_name = line.split('/')[-1].split('?')[0]
+                        else:
+                            # Relative URL
+                            playlist_name = line.split('?')[0]
+                            
+                        proxy_url = f"/api/stream/{self.stream_id}/{playlist_name}"
+                        modified_lines.append(proxy_url)
+                    elif line.endswith('.ts') or '.ts?' in line or any(ext in line for ext in ['.aac', '.mp4', '.vtt', '.webvtt']):
+                        # This is a media segment
+                        if line.startswith('http'):
+                            # Absolute URL
+                            segment_name = line.split('/')[-1].split('?')[0]
+                        else:
+                            # Relative URL
+                            segment_name = line
+                            
+                        proxy_url = f"/api/stream/{self.stream_id}/{segment_name}"
+                        modified_lines.append(proxy_url)
+                    else:
+                        # Keep other lines unchanged
+                        modified_lines.append(line)
+                else:
+                    # Empty lines or comments
+                    modified_lines.append(line)
             
-            # Join lines and save modified M3U8
-            modified_content = '\n'.join(modified_lines)
-            with open(m3u8_path, 'w', encoding='utf-8') as f:
-                f.write(modified_content)
+            # Save modified M3U8
+            modified_m3u8_path = os.path.join(self.download_folder, "manifest.m3u8")
+            with open(modified_m3u8_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(modified_lines))
             
-            logging.info(f"M3U8 file successfully modified for proxy playback: {m3u8_path}")
+            logging.info(f"M3U8 file successfully modified for proxy playback: {modified_m3u8_path}")
         except Exception as e:
             logging.error(f"Error modifying M3U8 file: {e}")
     
+    def get_m3u8_content(self, path=None):
+        """Get the modified M3U8 content"""
+        try:
+            if path:
+                # This is a sub-playlist
+                # Download the sub-playlist and modify it
+                if path.startswith('http'):
+                    sub_url = path
+                else:
+                    sub_url = f"{self.base_url}{path}"
+                
+                if '?' not in sub_url and self.query_params:
+                    sub_url = self.add_auth_params_to_url(sub_url)
+                
+                logging.info(f"Downloading sub-playlist: {sub_url}")
+                response = requests.get(sub_url)
+                response.raise_for_status()
+                
+                # Save original sub-playlist
+                sub_filename = path.split('/')[-1].split('?')[0]
+                sub_path = os.path.join(self.download_folder, sub_filename)
+                with open(sub_path, 'wb') as f:
+                    f.write(response.content)
+                
+                # Modify the sub-playlist
+                self.modify_m3u8_for_proxy(response.content.decode('utf-8'))
+                
+                # Return the modified sub-playlist
+                modified_path = os.path.join(self.download_folder, "manifest.m3u8")
+                with open(modified_path, 'rb') as f:
+                    return f.read()
+            else:
+                # Return the main playlist
+                manifest_path = os.path.join(self.download_folder, "manifest.m3u8")
+                with open(manifest_path, 'rb') as f:
+                    return f.read()
+        except Exception as e:
+            logging.error(f"Error getting M3U8 content: {e}")
+            return None
+    
     def get_segment(self, path):
         """Fetch a segment with authentication parameters"""
-        # Check if segment is in content cache
-        if path in self.cache and 'content' in self.cache[path]:
+        # Check if segment is in cache
+        if path in self.cache:
             logging.info(f"Serving segment from cache: {path}")
             return self.cache[path]
         
         try:
-            # If we have a mapping for this segment/playlist from previous processing
-            if path in self.cache and 'original_url' in self.cache[path]:
-                original_url = self.cache[path]['original_url']
-                authenticated_url = self.add_auth_params_to_url(original_url)
-                
-                logging.info(f"Proxy: Request for mapped path {path}")
-                logging.info(f"Redirecting to URL: {authenticated_url}")
-                
-                response = requests.get(authenticated_url)
-                response.raise_for_status()
-                
-                # For M3U8 playlists, process them to update URLs
-                if path.endswith('.m3u8'):
-                    content_type = 'application/vnd.apple.mpegurl'
-                    
-                    # Create a unique path for this sub-playlist
-                    sub_playlist_path = os.path.join(self.download_folder, path)
-                    os.makedirs(os.path.dirname(sub_playlist_path), exist_ok=True)
-                    
-                    # Save the playlist
-                    with open(sub_playlist_path, 'wb') as f:
-                        f.write(response.content)
-                    
-                    # Modify the sub-playlist
-                    self.modify_m3u8_for_proxy(sub_playlist_path)
-                    
-                    # Read back the modified playlist
-                    with open(sub_playlist_path, 'rb') as f:
-                        modified_content = f.read()
-                    
-                    # Cache the processed content
-                    self.cache[path] = {
-                        'content': modified_content,
-                        'content_type': content_type
-                    }
-                    
-                    return {
-                        'content': modified_content,
-                        'content_type': content_type
-                    }
-                else:
-                    # For regular segments, just cache and return
-                    content_type = response.headers.get('Content-Type', 'application/octet-stream')
-                    
-                    # Cache the response (only for small segments to avoid memory issues)
-                    if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
-                        self.cache[path] = {
-                            'content': response.content,
-                            'content_type': content_type
-                        }
-                    
-                    return {
-                        'content': response.content,
-                        'content_type': content_type
-                    }
+            # Handle different types of paths
+            if path.startswith('http'):
+                # Absolute URL
+                full_url = path
+            elif path.startswith('/'):
+                # Absolute path from domain root
+                domain = '/'.join(self.base_url.split('/')[:3])  # http(s)://domain.com
+                full_url = domain + path
             else:
-                # Fall back to the old approach for backward compatibility
-                url_parts = urllib.parse.urlparse(self.stream_url)
-                domain = f"{url_parts.scheme}://{url_parts.netloc}"
-                base_path = os.path.dirname(url_parts.path)
-                
-                # Construct full URL
-                full_url = f"{domain}{base_path}/{path}"
+                # Relative path
+                full_url = self.base_url + path
+            
+            # Add auth parameters if needed
+            if '?' not in full_url and self.query_params:
                 authenticated_url = self.add_auth_params_to_url(full_url)
-                
-                logging.info(f"Proxy: Request for unmapped path {path}")
-                logging.info(f"Redirecting to URL: {authenticated_url}")
-                
-                response = requests.get(authenticated_url)
-                response.raise_for_status()
-                
-                # Cache the response (only for small segments to avoid memory issues)
-                if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
-                    self.cache[path] = {
-                        'content': response.content,
-                        'content_type': response.headers.get('Content-Type', 'application/octet-stream')
-                    }
-                
-                return {
+            else:
+                authenticated_url = full_url
+            
+            logging.info(f"Proxy: Request for {path}")
+            logging.info(f"Redirecting to URL: {authenticated_url}")
+            
+            response = requests.get(authenticated_url)
+            response.raise_for_status()
+            
+            # Cache the response (only for small segments to avoid memory issues)
+            if len(response.content) < 10 * 1024 * 1024:  # Less than 10MB
+                self.cache[path] = {
                     'content': response.content,
                     'content_type': response.headers.get('Content-Type', 'application/octet-stream')
                 }
+            
+            return {
+                'content': response.content,
+                'content_type': response.headers.get('Content-Type', 'application/octet-stream')
+            }
         except Exception as e:
             logging.error(f"Error fetching segment: {e}")
             return None
 
-    def refresh_manifest(self):
-        """Refresh the manifest for live streams"""
-        if not self.is_m3u8:
-            # Only M3U8 live streams need refreshing
-            return
-            
-        try:
-            response = requests.get(self.stream_url)
-            response.raise_for_status()
-            
-            # Save M3U8 file
-            manifest_path = os.path.join(self.download_folder, "playlist.m3u8")
-            with open(manifest_path, 'wb') as f:
-                f.write(response.content)
-            
-            # Store the content
-            self.parsed_manifest = response.text
-            
-            # Modify M3U8 for proxy playback
-            self.modify_m3u8_for_proxy(manifest_path)
-            
-            logging.info(f"Successfully refreshed M3U8 manifest: {self.stream_id}")
-            return True
-        except Exception as e:
-            logging.error(f"Error refreshing M3U8 manifest: {e}")
-            return False
 
-
-def create_jwt_token(stream_url):
+def create_jwt_token(m3u8_url):
     """Create a JWT token for a video stream"""
     stream_id = str(uuid.uuid4())
     payload = {
         'stream_id': stream_id,
-        'stream_url': stream_url,
+        'm3u8_url': m3u8_url,
         'exp': int(time.time()) + JWT_EXPIRY
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm='HS256')
@@ -381,89 +288,38 @@ def validate_jwt_token(token):
 
 @app.route('/api/create_stream', methods=['POST'])
 def create_stream():
-    """Create a new stream from a manifest URL (MPD or M3U8)"""
+    """Create a new stream from an M3U8 URL"""
     data = request.get_json()
     
-    if not data or 'stream_url' not in data:
-        return jsonify({'error': 'Stream URL is required'}), 400
+    if not data or 'm3u8_url' not in data:
+        return jsonify({'error': 'M3U8 URL is required'}), 400
     
-    stream_url = data['stream_url']
-    is_live = data.get('is_live', False)
-    
-    # Check if URL has .mpd or .m3u8 extension, or contains those strings
-    is_mpd = '.mpd' in stream_url.lower()
-    is_m3u8 = '.m3u8' in stream_url.lower()
-    
-    # Validate URL format
-    if not (is_mpd or is_m3u8):
-        return jsonify({'error': 'URL must contain MPD or M3U8 manifest reference'}), 400
+    m3u8_url = data['m3u8_url']
     
     # Create JWT token
-    token, stream_id = create_jwt_token(stream_url)
+    token, stream_id = create_jwt_token(m3u8_url)
     
-    # Initialize Stream player
-    player = StreamPlayerWithAuth(stream_url, stream_id)
+    # Initialize HLS player
+    player = HLSPlayerWithAuth(m3u8_url, stream_id)
     
-    # Fetch and parse manifest
-    if not player.fetch_manifest():
-        return jsonify({'error': 'Failed to fetch manifest file'}), 500
+    # Fetch and parse M3U8
+    if not player.fetch_m3u8():
+        return jsonify({'error': 'Failed to fetch M3U8 file'}), 500
     
     # Store player in active streams
-    active_streams[stream_id] = {
-        'player': player,
-        'is_live': is_live,
-        'last_access': int(time.time())
-    }
+    active_streams[stream_id] = player
     
     # Return stream information
-    manifest_path = "manifest.mpd" if is_mpd else "playlist.m3u8"
-    
     return jsonify({
         'token': token,
         'stream_id': stream_id,
-        'manifest_url': f"/api/stream/{token}/{manifest_path}",
-        'expires_at': int(time.time()) + JWT_EXPIRY,
-        'is_live': is_live,
-        'format': 'DASH' if is_mpd else 'HLS'
+        'manifest_url': f"/api/stream/{token}/manifest.m3u8",
+        'expires_at': int(time.time()) + JWT_EXPIRY
     })
 
 
-@app.route('/api/stream/<token>/manifest.mpd', methods=['GET'])
-def get_mpd_manifest(token):
-    """Serve the MPD manifest file for a stream"""
-    payload = validate_jwt_token(token)
-    
-    if not payload:
-        return jsonify({'error': 'Invalid or expired token'}), 401
-    
-    stream_id = payload['stream_id']
-    
-    if stream_id not in active_streams:
-        # Re-initialize the player if it's not in active streams
-        player = StreamPlayerWithAuth(payload['stream_url'], stream_id)
-        if not player.fetch_manifest():
-            return jsonify({'error': 'Failed to fetch MPD file'}), 500
-        active_streams[stream_id] = {
-            'player': player,
-            'is_live': False,
-            'last_access': int(time.time())
-        }
-    
-    # Update last access time
-    active_streams[stream_id]['last_access'] = int(time.time())
-    player = active_streams[stream_id]['player']
-    
-    try:
-        with open(os.path.join(player.download_folder, "manifest.mpd"), 'rb') as f:
-            content = f.read()
-        return Response(content, mimetype='application/dash+xml')
-    except Exception as e:
-        logging.error(f"Error serving MPD file: {e}")
-        return jsonify({'error': 'Failed to serve MPD file'}), 500
-
-
-@app.route('/api/stream/<token>/playlist.m3u8', methods=['GET'])
-def get_m3u8_manifest(token):
+@app.route('/api/stream/<token>/manifest.m3u8', methods=['GET'])
+def get_manifest(token):
     """Serve the M3U8 manifest file for a stream"""
     payload = validate_jwt_token(token)
     
@@ -474,65 +330,43 @@ def get_m3u8_manifest(token):
     
     if stream_id not in active_streams:
         # Re-initialize the player if it's not in active streams
-        player = StreamPlayerWithAuth(payload['stream_url'], stream_id)
-        if not player.fetch_manifest():
+        player = HLSPlayerWithAuth(payload['m3u8_url'], stream_id)
+        if not player.fetch_m3u8():
             return jsonify({'error': 'Failed to fetch M3U8 file'}), 500
-        active_streams[stream_id] = {
-            'player': player,
-            'is_live': False,
-            'last_access': int(time.time())
-        }
+        active_streams[stream_id] = player
     
-    # Update last access time
-    active_streams[stream_id]['last_access'] = int(time.time())
-    stream_data = active_streams[stream_id]
-    player = stream_data['player']
+    player = active_streams[stream_id]
     
-    # For live streams, refresh the manifest
-    if stream_data['is_live']:
-        player.refresh_manifest()
-    
-    try:
-        with open(os.path.join(player.download_folder, "playlist.m3u8"), 'rb') as f:
-            content = f.read()
+    # Serve the M3U8 content
+    content = player.get_m3u8_content()
+    if content:
         return Response(content, mimetype='application/vnd.apple.mpegurl')
-    except Exception as e:
-        logging.error(f"Error serving M3U8 file: {e}")
+    else:
         return jsonify({'error': 'Failed to serve M3U8 file'}), 500
 
 
-@app.route('/api/stream/<token>/<path:segment_path>', methods=['GET'])
-def get_segment(token, segment_path):
-    """Serve a segment file for a stream"""
-    payload = validate_jwt_token(token)
-    
-    if not payload:
-        return jsonify({'error': 'Invalid or expired token'}), 401
-    
-    stream_id = payload['stream_id']
-    
+@app.route('/api/stream/<stream_id>/<path:segment_path>', methods=['GET'])
+def get_segment_or_playlist(stream_id, segment_path):
+    """Serve a segment or sub-playlist file for a stream"""
     if stream_id not in active_streams:
-        # Re-initialize the player if it's not in active streams
-        player = StreamPlayerWithAuth(payload['stream_url'], stream_id)
-        if not player.fetch_manifest():
-            return jsonify({'error': 'Failed to fetch manifest file'}), 500
-        active_streams[stream_id] = {
-            'player': player,
-            'is_live': False,
-            'last_access': int(time.time())
-        }
+        return jsonify({'error': 'Stream not found'}), 404
     
-    # Update last access time
-    active_streams[stream_id]['last_access'] = int(time.time())
-    player = active_streams[stream_id]['player']
+    player = active_streams[stream_id]
     
-    # Get segment from the player
-    segment = player.get_segment(segment_path)
-    
-    if segment:
-        return Response(segment['content'], mimetype=segment['content_type'])
+    # Check if this is an M3U8 file (sub-playlist)
+    if segment_path.endswith('.m3u8'):
+        content = player.get_m3u8_content(segment_path)
+        if content:
+            return Response(content, mimetype='application/vnd.apple.mpegurl')
+        else:
+            return jsonify({'error': 'Failed to serve sub-playlist'}), 500
     else:
-        return jsonify({'error': 'Failed to fetch segment'}), 500
+        # This is a media segment
+        segment = player.get_segment(segment_path)
+        if segment:
+            return Response(segment['content'], mimetype=segment['content_type'])
+        else:
+            return jsonify({'error': 'Failed to fetch segment'}), 500
 
 
 @app.route('/api/info/<token>', methods=['GET'])
@@ -548,36 +382,12 @@ def get_stream_info(token):
     if stream_id not in active_streams:
         return jsonify({'error': 'Stream not found'}), 404
     
-    stream_data = active_streams[stream_id]
-    player = stream_data['player']
-    
-    # Determine manifest path based on format
-    manifest_path = "manifest.mpd" if player.is_mpd else "playlist.m3u8"
-    
     return jsonify({
         'stream_id': stream_id,
-        'stream_url': payload['stream_url'],
-        'manifest_url': f"/api/stream/{token}/{manifest_path}",
-        'expires_at': payload['exp'],
-        'is_live': stream_data['is_live'],
-        'format': 'DASH' if player.is_mpd else 'HLS'
+        'm3u8_url': payload['m3u8_url'],
+        'manifest_url': f"/api/stream/{token}/manifest.m3u8",
+        'expires_at': payload['exp']
     })
-
-
-# Refresh live M3U8 playlists periodically
-def refresh_live_streams():
-    """Refresh M3U8 playlists for live streams"""
-    while True:
-        for stream_id, stream_data in active_streams.items():
-            # Only refresh M3U8 live streams that have been accessed recently
-            current_time = int(time.time())
-            if (stream_data['is_live'] and 
-                stream_data['player'].is_m3u8 and 
-                current_time - stream_data['last_access'] < 300):  # 5 minutes
-                stream_data['player'].refresh_manifest()
-        
-        # Sleep for 10 seconds before next refresh
-        time.sleep(10)
 
 
 # Clean up inactive streams periodically
@@ -587,16 +397,20 @@ def cleanup_inactive_streams():
         current_time = int(time.time())
         streams_to_remove = []
         
-        for stream_id, stream_data in active_streams.items():
+        for stream_id, player in active_streams.items():
             # Check if stream has been inactive for more than 1 hour
-            if current_time - stream_data['last_access'] > 3600:  # 1 hour
-                streams_to_remove.append(stream_id)
+            if os.path.exists(player.download_folder):
+                manifest_path = os.path.join(player.download_folder, "manifest.m3u8")
+                if os.path.exists(manifest_path):
+                    mod_time = os.path.getmtime(manifest_path)
+                    if current_time - mod_time > 3600:  # 1 hour
+                        streams_to_remove.append(stream_id)
         
         # Remove inactive streams
         for stream_id in streams_to_remove:
             try:
                 import shutil
-                shutil.rmtree(active_streams[stream_id]['player'].download_folder)
+                shutil.rmtree(active_streams[stream_id].download_folder)
                 del active_streams[stream_id]
                 logging.info(f"Removed inactive stream: {stream_id}")
             except Exception as e:
@@ -606,14 +420,70 @@ def cleanup_inactive_streams():
         time.sleep(3600)
 
 
-# Start background threads
+# Start cleanup thread
 cleanup_thread = threading.Thread(target=cleanup_inactive_streams)
 cleanup_thread.daemon = True
 cleanup_thread.start()
 
-refresh_thread = threading.Thread(target=refresh_live_streams)
-refresh_thread.daemon = True
-refresh_thread.start()
+
+# Direct access URL processor - for simpler use cases
+@app.route('/process_m3u8', methods=['GET'])
+def process_m3u8():
+    # Get the M3U8 URL from the request parameters
+    m3u8_url = request.args.get('url')
+    if not m3u8_url:
+        return "Please provide an M3U8 URL as a 'url' query parameter", 400
+    
+    try:
+        # Parse the URL and extract query parameters
+        parsed_url = urllib.parse.urlparse(m3u8_url)
+        base_url = urlunparse(parsed_url._replace(query=''))
+        base_path = '/'.join(base_url.split('/')[:-1]) + '/'
+        query_params = dict(parse_qsl(parsed_url.query))
+        
+        # Get the M3U8 content
+        response = requests.get(m3u8_url)
+        if response.status_code != 200:
+            return f"Failed to fetch M3U8 file: {response.status_code}", 500
+        
+        content = response.text
+        
+        # Process the M3U8 content to add parameters to segment URLs
+        def replace_url(match):
+            segment_url = match.group(1)
+            # Skip URLs that already have parameters or are absolute URLs
+            if '?' in segment_url or segment_url.startswith('http'):
+                return match.group(0)
+            
+            # Create the full URL for the segment
+            if segment_url.startswith('/'):
+                # Handle absolute path
+                domain = '/'.join(base_url.split('/')[:3])  # http(s)://domain.com
+                full_url = domain + segment_url
+            else:
+                # Handle relative path
+                full_url = base_path + segment_url
+                
+            # Add the parameters
+            if '?' in full_url:
+                full_url += '&' + urllib.parse.urlencode(query_params)
+            else:
+                full_url += '?' + urllib.parse.urlencode(query_params)
+                
+            return match.group(0).replace(segment_url, full_url)
+        
+        # Find lines that are not comments and likely contain segment URLs
+        # Match both TS files and other media segments
+        processed_content = re.sub(r'([^\s#][^\s]*\.ts)', replace_url, content)
+        
+        # Handle sub-playlists in master playlist
+        processed_content = re.sub(r'([^\s#][^\s]*\.m3u8)', replace_url, content)
+        
+        # Return the processed M3U8 content as a response
+        return Response(processed_content, mimetype='application/vnd.apple.mpegurl')
+        
+    except Exception as e:
+        return f"Error processing M3U8 file: {str(e)}", 500
 
 
 # Simple frontend for testing
@@ -623,42 +493,71 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Streaming API</title>
+        <title>HLS Stream API</title>
         <style>
             body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
             h1 { color: #333; }
+            .tab { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; }
+            .tab button { background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; }
+            .tab button:hover { background-color: #ddd; }
+            .tab button.active { background-color: #ccc; }
+            .tabcontent { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; }
             form { margin-bottom: 20px; }
             label { display: block; margin-bottom: 5px; }
             input[type="text"] { width: 100%; padding: 8px; margin-bottom: 10px; }
             button { padding: 10px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; }
-            .checkbox-container { margin-bottom: 10px; }
             pre { background: #f4f4f4; padding: 10px; overflow: auto; }
-            #result { margin-top: 20px; }
-            .tab { margin-right: 20px; padding: 10px; display: inline-block; background: #ddd; cursor: pointer; }
-            .tab.active { background: #4CAF50; color: white; }
-            .player-container { margin-top: 20px; }
+            .result { margin-top: 20px; }
         </style>
     </head>
     <body>
-        <h1>Streaming API</h1>
-        <form id="streamForm">
-            <label for="stream_url">Stream URL (MPD or M3U8):</label>
-            <input type="text" id="stream_url" name="stream_url" placeholder="Enter Stream URL (.mpd or .m3u8)" required>
-            
-            <div class="checkbox-container">
-                <input type="checkbox" id="is_live" name="is_live">
-                <label for="is_live">This is a live stream (for M3U8 only)</label>
-            </div>
-            
-            <button type="submit">Create Stream</button>
-        </form>
-        <div id="result"></div>
+        <h1>HLS Stream API</h1>
+        
+        <div class="tab">
+            <button class="tablinks active" onclick="openTab(event, 'AdvancedMode')">Advanced Mode</button>
+            <button class="tablinks" onclick="openTab(event, 'SimpleMode')">Simple Mode</button>
+        </div>
+        
+        <div id="AdvancedMode" class="tabcontent" style="display: block;">
+            <h2>Create a Proxy Stream</h2>
+            <p>This mode creates a protected stream that requires a token.</p>
+            <form id="streamForm">
+                <label for="m3u8_url">M3U8 URL:</label>
+                <input type="text" id="m3u8_url" name="m3u8_url" placeholder="Enter M3U8 URL" required>
+                <button type="submit">Create Stream</button>
+            </form>
+            <div id="advancedResult" class="result"></div>
+        </div>
+        
+        <div id="SimpleMode" class="tabcontent">
+            <h2>Process M3U8 URL</h2>
+            <p>This mode generates a direct URL that adds parameters to all segments.</p>
+            <form id="simpleForm">
+                <label for="simple_m3u8_url">M3U8 URL:</label>
+                <input type="text" id="simple_m3u8_url" name="simple_m3u8_url" placeholder="Enter M3U8 URL" required>
+                <button type="submit">Process URL</button>
+            </form>
+            <div id="simpleResult" class="result"></div>
+        </div>
 
         <script>
+            function openTab(evt, tabName) {
+                var i, tabcontent, tablinks;
+                tabcontent = document.getElementsByClassName("tabcontent");
+                for (i = 0; i < tabcontent.length; i++) {
+                    tabcontent[i].style.display = "none";
+                }
+                tablinks = document.getElementsByClassName("tablinks");
+                for (i = 0; i < tablinks.length; i++) {
+                    tablinks[i].className = tablinks[i].className.replace(" active", "");
+                }
+                document.getElementById(tabName).style.display = "block";
+                evt.currentTarget.className += " active";
+            }
+            
             document.getElementById('streamForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const stream_url = document.getElementById('stream_url').value;
-                const is_live = document.getElementById('is_live').checked;
+                const m3u8_url = document.getElementById('m3u8_url').value;
                 
                 try {
                     const response = await fetch('/api/create_stream', {
@@ -666,70 +565,100 @@ def index():
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ stream_url, is_live })
+                        body: JSON.stringify({ m3u8_url })
                     });
                     
                     const data = await response.json();
-                    const resultDiv = document.getElementById('result');
+                    const resultDiv = document.getElementById('advancedResult');
                     
                     if (response.ok) {
-                        let playerHtml = '';
-                        
-                        if (data.format === 'DASH') {
-                            playerHtml = `
-                                <div class="player-container">
-                                    <video id="videoPlayer" controls style="width: 100%;">
-                                        <source src="${data.manifest_url}" type="application/dash+xml">
-                                        Your browser does not support the video tag.
-                                    </video>
-                                    <script src="https://cdn.dashjs.org/latest/dash.all.min.js"><\/script>
-                                    <script>
-                                        const player = dashjs.MediaPlayer().create();
-                                        player.initialize(document.querySelector("#videoPlayer"), "${data.manifest_url}", true);
-                                    <\/script>
-                                </div>
-                            `;
-                        } else {
-                            playerHtml = `
-                                <div class="player-container">
-                                    <video id="videoPlayer" controls style="width: 100%;"></video>
-                                    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
-                                    <script>
-                                        const video = document.getElementById('videoPlayer');
-                                        if(Hls.isSupported()) {
-                                            const hls = new Hls();
-                                            hls.loadSource('${data.manifest_url}');
-                                            hls.attachMedia(video);
-                                            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                                                video.play();
-                                            });
-                                        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                            video.src = '${data.manifest_url}';
-                                            video.addEventListener('loadedmetadata', function() {
-                                                video.play();
-                                            });
-                                        }
-                                    <\/script>
-                                </div>
-                            `;
-                        }
-                        
                         resultDiv.innerHTML = `
-                            <h2>Stream Created</h2>
+                            <h3>Stream Created</h3>
                             <p>Token: ${data.token}</p>
                             <p>Stream ID: ${data.stream_id}</p>
-                            <p>Format: ${data.format}</p>
-                            <p>Live Stream: ${data.is_live ? 'Yes' : 'No'}</p>
                             <p>Manifest URL: <a href="${data.manifest_url}" target="_blank">${data.manifest_url}</a></p>
-                            <p>Use this URL in your ${data.format} player.</p>
+                            <p>Use this URL in your HLS player.</p>
                             <h3>Player Test</h3>
-                            ${playerHtml}
+                            <div id="player">
+                                <video id="videoPlayer" controls style="width: 100%;">
+                                    <source src="${data.manifest_url}" type="application/x-mpegURL">
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+                            <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
+                            <script>
+                                document.addEventListener('DOMContentLoaded', function() {
+                                    const video = document.getElementById('videoPlayer');
+                                    const manifestUrl = "${data.manifest_url}";
+                                    
+                                    if (Hls.isSupported()) {
+                                        const hls = new Hls();
+                                        hls.loadSource(manifestUrl);
+                                        hls.attachMedia(video);
+                                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                                            video.play();
+                                        });
+                                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                                        video.src = manifestUrl;
+                                        video.addEventListener('loadedmetadata', function() {
+                                            video.play();
+                                        });
+                                    }
+                                });
+                            <\/script>
                         `;
                     } else {
-                        resultDiv.innerHTML = `<h2>Error</h2><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        resultDiv.innerHTML = `<h3>Error</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
                     }
                 } catch (error) {
-                    document.getElementById('result').innerHTML = `<h2>Error</h2><pre>${error}</pre>`;
+                    document.getElementById('advancedResult').innerHTML = `<h3>Error</h3><pre>${error}</pre>`;
+                }
+            });
+            
+            document.getElementById('simpleForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const m3u8_url = document.getElementById('simple_m3u8_url').value;
+                
+                if (m3u8_url) {
+                    const encodedUrl = encodeURIComponent(m3u8_url);
+                    const processingUrl = `/process_m3u8?url=${encodedUrl}`;
+                    
+                    document.getElementById('simpleResult').innerHTML = `
+                        <h3>Processed URL</h3>
+                        <p>Use this URL in your HLS player:</p>
+                        <pre>${window.location.origin}${processingUrl}</pre>
+                        <p><a href="${processingUrl}" target="_blank">Test in new tab</a></p>
+                        <h3>Player Test</h3>
+                        <div id="simplePlayer">
+                            <video id="simpleVideoPlayer" controls style="width: 100%;">
+                                <source src="${processingUrl}" type="application/x-mpegURL">
+                                Your browser does not support the video tag.
+                            </video>
+                        </div>
+                        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
+                        <script>
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const video = document.getElementById('simpleVideoPlayer');
+                                const manifestUrl = "${processingUrl}";
+                                
+                                if (Hls.isSupported()) {
+                                    const hls = new Hls();
+                                    hls.loadSource(manifestUrl);
+                                    hls.attachMedia(video);
+                                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                                        video.play();
+                                    });
+                                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                                    video.src = manifestUrl;
+                                    video.addEventListener('loadedmetadata', function() {
+                                        video.play();
+                                    });
+                                }
+                            });
+                        <\/script>
+                    `;
+                } else {
+                    alert('Please enter an M3U8 URL');
                 }
             });
         </script>
@@ -740,9 +669,9 @@ def index():
 
 if __name__ == "__main__":
     # Create temp directory if it doesn't exist
-    if not os.path.exists("temp_videos"):
-        os.makedirs("temp_videos")
+    if not os.path.exists("temp_hls"):
+        os.makedirs("temp_hls")
     
     # For production, use gunicorn or another WSGI server
     port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)
