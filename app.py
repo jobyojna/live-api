@@ -114,12 +114,20 @@ class HLSPlayerWithAuth:
                     if '#EXT-X-STREAM-INF' in line:
                         modified_lines.append(line)
                     elif '#EXT-X-KEY' in line and 'URI=' in line:
-                        # Keep the encryption key URL proxy as is
+                        # Extract videoKey from the original URL if present
                         pattern = r'URI="([^"]+)"'
                         match = re.search(pattern, line)
                         if match:
                             original_url = match.group(1)
+                            # Try to extract videoKey from the original URL
+                            video_key_match = re.search(r'videoKey=([^&]+)', original_url)
+                            video_key = video_key_match.group(1) if video_key_match else ''
+                            
+                            # Create proxy URL with videoKey if available
                             proxy_url = f"/api/stream/{self.stream_id}/get-hls-key"
+                            if video_key:
+                                proxy_url = f"{proxy_url}?videoKey={video_key}"
+                            
                             modified_line = line.replace(f'URI="{original_url}"', f'URI="{proxy_url}"')
                             modified_lines.append(modified_line)
                         else:
