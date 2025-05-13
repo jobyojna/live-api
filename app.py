@@ -105,30 +105,21 @@ class HLSPlayerWithAuth:
             lines = content.splitlines()
             modified_lines = []
             
+            # Extract URLPrefix from query parameters
+            url_prefix = self.query_params.get('URLPrefix', '')
+            
             for line in lines:
                 if line.startswith('#'):
                     # Handle directives with URLs
                     if '#EXT-X-STREAM-INF' in line:
                         modified_lines.append(line)
                     elif '#EXT-X-KEY' in line and 'URI=' in line:
-                        # Replace encryption key URLs
+                        # Keep the encryption key URL proxy as is
                         pattern = r'URI="([^"]+)"'
                         match = re.search(pattern, line)
                         if match:
                             original_url = match.group(1)
-                            # Handle relative or absolute URLs
-                            if not original_url.startswith('http'):
-                                if original_url.startswith('/'):
-                                    # Absolute path from domain root
-                                    domain = '/'.join(self.base_url.split('/')[:3])  # http(s)://domain.com
-                                    full_url = domain + original_url
-                                else:
-                                    # Relative path
-                                    full_url = self.base_url + original_url
-                            else:
-                                full_url = original_url
-                                
-                            proxy_url = f"/api/stream/{self.stream_id}/{original_url.split('/')[-1]}"
+                            proxy_url = f"/api/stream/{self.stream_id}/get-hls-key"
                             modified_line = line.replace(f'URI="{original_url}"', f'URI="{proxy_url}"')
                             modified_lines.append(modified_line)
                         else:
@@ -141,24 +132,23 @@ class HLSPlayerWithAuth:
                         # This is a variant playlist
                         if line.startswith('http'):
                             # Absolute URL
-                            playlist_name = line.split('/')[-1].split('?')[0]
+                            modified_lines.append(line)
                         else:
                             # Relative URL
-                            playlist_name = line.split('?')[0]
-                            
-                        proxy_url = f"/api/stream/{self.stream_id}/{playlist_name}"
-                        modified_lines.append(proxy_url)
+                            full_url = self.base_url + line
+                            modified_lines.append(full_url)
                     elif line.endswith('.ts') or '.ts?' in line or any(ext in line for ext in ['.aac', '.mp4', '.vtt', '.webvtt']):
                         # This is a media segment
                         if line.startswith('http'):
                             # Absolute URL
-                            segment_name = line.split('/')[-1].split('?')[0]
+                            modified_lines.append(line)
                         else:
-                            # Relative URL
-                            segment_name = line
-                            
-                        proxy_url = f"/api/stream/{self.stream_id}/{segment_name}"
-                        modified_lines.append(proxy_url)
+                            # Relative URL - Add URLPrefix and other query parameters
+                            segment_url = f"{self.base_url}{line}"
+                            if self.query_params:
+                                query_string = '&'.join([f"{k}={v}" for k, v in self.query_params.items()])
+                                segment_url = f"{segment_url}?{query_string}"
+                            modified_lines.append(segment_url)
                     else:
                         # Keep other lines unchanged
                         modified_lines.append(line)
