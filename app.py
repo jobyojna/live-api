@@ -18,7 +18,7 @@ CORS(app)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # JWT Secret Key - Change this to a secure secret in production
-JWT_SECRET = "your-secret-key-change-this"
+JWT_SECRET = "Jaibabawalisecretkeyhbro"
 # How long the JWT token is valid (in seconds)
 JWT_EXPIRY = 3600 * 24  # 24 hours
 
@@ -373,7 +373,7 @@ def get_segment_or_playlist(stream_id, segment_path):
             return jsonify({'error': 'VideoKey is required'}), 400
             
         # Use the fixed authorization token for penpencil API
-        auth_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NDc0ODY3OTMuNTY4LCJkYXRhIjp7Il9pZCI6IjY2NjQwNDYyYzg0NzgzZDM4NjMxMjMzNyIsInVzZXJuYW1lIjoiOTY2ODQyNTI1NyIsImZpcnN0TmFtZSI6IlB1bmFtIFByYWhhcmFqIiwibGFzdE5hbWUiOiJUcmlwYXRoeSAiLCJvcmdhbml6YXRpb24iOnsiX2lkIjoiNWViMzkzZWU5NWZhYjc0NjhhNzlkMTg5Iiwid2Vic2l0ZSI6InBoeXNpY3N3YWxsYWguY29tIiwibmFtZSI6IlBoeXNpY3N3YWxsYWgifSwiZW1haWwiOiJwdW5hbXByYWhhcmFqQGdtYWlsLmNvbSIsInJvbGVzIjpbIjViMjdiZDk2NTg0MmY5NTBhNzc4YzZlZiJdLCJjb3VudHJ5R3JvdXAiOiJJTiIsInR5cGUiOiJVU0VSIn0sImlhdCI6MTc0Njg4MTk5M30.nxRAMtZWVLp_9IWgygfh4ID7N0ipx6PX7sLniC9SL3A"
+        auth_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NDc4MTM5MDQuNTc3LCJkYXRhIjp7Il9pZCI6IjYxMmY1YmY1YjYwMjE2MDAxMjI4MzQ0MSIsInVzZXJuYW1lIjoiNzYwNjk3MzcyNCIsImZpcnN0TmFtZSI6IlJvaGFuTmF5YWsiLCJsYXN0TmFtZSI6IiIsIm9yZ2FuaXphdGlvbiI6eyJfaWQiOiI1ZWIzOTNlZTk1ZmFiNzQ2OGE3OWQxODkiLCJ3ZWJzaXRlIjoicGh5c2ljc3dhbGxhaC5jb20iLCJuYW1lIjoiUGh5c2ljc3dhbGxhaCJ9LCJlbWFpbCI6InJvaGFubmF5YWs1NzFAZ21haWwuY29tIiwicm9sZXMiOlsiNWIyN2JkOTY1ODQyZjk1MGE3NzhjNmVmIiwiNWNjOTVhMmU4YmRlNGQ2NmRlNDAwYjM3Il0sImNvdW50cnlHcm91cCI6IklOIiwidHlwZSI6IlVTRVIifSwiaWF0IjoxNzQ3MjA5MTA0fQ.6ryBUfm1hglNwUt2Adn5H4IgChiAOkR1Ot75KUf-lrk"
         
         # Construct the penpencil API URL with authorization parameter
         key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={video_key}&key=enc.key&authorization={auth_token}"
