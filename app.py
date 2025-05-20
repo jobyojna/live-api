@@ -373,7 +373,7 @@ def get_segment_or_playlist(stream_id, segment_path):
             return jsonify({'error': 'VideoKey is required'}), 400
             
         # Use the fixed authorization token for penpencil API
-        auth_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NDgzMzQzMzUuOTIyLCJkYXRhIjp7Il9pZCI6IjYyY2M2OTQ5Njk5MjIxMDAxMTkzNjczNCIsInVzZXJuYW1lIjoiNjIwMTYzNjU0OCIsImZpcnN0TmFtZSI6Ikt1bmRhbiBLdW1hciBTaW5naCIsImxhc3ROYW1lIjoiIiwib3JnYW5pemF0aW9uIjp7Il9pZCI6IjVlYjM5M2VlOTVmYWI3NDY4YTc5ZDE4OSIsIndlYnNpdGUiOiJwaHlzaWNzd2FsbGFoLmNvbSIsIm5hbWUiOiJQaHlzaWNzd2FsbGFoIn0sImVtYWlsIjoia3VuZGFuaGFzYXBob25lQGdtYWlsLmNvbSIsInJvbGVzIjpbIjViMjdiZDk2NTg0MmY5NTBhNzc4YzZlZiJdLCJjb3VudHJ5R3JvdXAiOiJJTiIsInR5cGUiOiJVU0VSIn0sImlhdCI6MTc0NzcyOTUzNX0.Ii9GUksxmdV3Xjy6RhwnJOVVC_irmcCoKuPsaOHq4jk"
+        auth_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NDgzMzUxMzAuMDQ2LCJkYXRhIjp7Il9pZCI6IjYyY2M2OTQ5Njk5MjIxMDAxMTkzNjczNCIsInVzZXJuYW1lIjoiNjIwMTYzNjU0OCIsImZpcnN0TmFtZSI6Ikt1bmRhbiBLdW1hciBTaW5naCIsImxhc3ROYW1lIjoiIiwib3JnYW5pemF0aW9uIjp7Il9pZCI6IjVlYjM5M2VlOTVmYWI3NDY4YTc5ZDE4OSIsIndlYnNpdGUiOiJwaHlzaWNzd2FsbGFoLmNvbSIsIm5hbWUiOiJQaHlzaWNzd2FsbGFoIn0sImVtYWlsIjoia3VuZGFuaGFzYXBob25lQGdtYWlsLmNvbSIsInJvbGVzIjpbIjViMjdiZDk2NTg0MmY5NTBhNzc4YzZlZiJdLCJjb3VudHJ5R3JvdXAiOiJJTiIsInR5cGUiOiJVU0VSIn0sImlhdCI6MTc0NzczMDMzMH0.xCKJognwH2hVBP6Hc83_zox1jSY-N4gr9bGXp1ZsJYA"
         # Construct the penpencil API URL with authorization parameter
         key_url = f"https://api.penpencil.co/v1/videos/get-hls-key?videoKey={video_key}&key=enc.key&authorization={auth_token}"
         
