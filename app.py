@@ -717,7 +717,7 @@ def index():
                     resultDiv.innerHTML = `
                         <h3>Stream Created</h3>
                         <div class="url-container" style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
-                            <input type="text" value="${data.manifest_url}" id="manifestUrlInput" readonly style="flex: 1;">
+                            <input type="text" value="https://live-api-yztz.onrender.com/${data.manifest_url}" id="manifestUrlInput" readonly style="flex: 1;">
                             <button onclick="copyManifestUrl()" style="white-space: nowrap;">Copy URL</button>
                         </div>
                         <h3>Player Test</h3>
