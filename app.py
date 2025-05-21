@@ -732,11 +732,26 @@ def index():
                         <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"><\/script>
                         <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.16.2/dist/videojs-http-streaming.min.js"><\/script>
                         <script>
-                            function copyManifestUrl() {
+                            async function copyManifestUrl() {
                                 const input = document.getElementById('manifestUrlInput');
-                                input.select();
-                                document.execCommand('copy');
-                                alert('URL copied to clipboard!');
+                                try {
+                                    await navigator.clipboard.writeText(input.value);
+                                    const toast = document.createElement('div');
+                                    toast.style.position = 'fixed';
+                                    toast.style.bottom = '20px';
+                                    toast.style.left = '50%';
+                                    toast.style.transform = 'translateX(-50%)';
+                                    toast.style.backgroundColor = '#ffd700';
+                                    toast.style.color = '#1a1a1a';
+                                    toast.style.padding = '10px 20px';
+                                    toast.style.borderRadius = '5px';
+                                    toast.style.zIndex = '1000';
+                                    toast.textContent = 'URL कॉपी हो गया!';
+                                    document.body.appendChild(toast);
+                                    setTimeout(() => toast.remove(), 2000);
+                                } catch (err) {
+                                    alert('URL कॉपी करने में समस्या हुई!');
+                                }
                             }
 
                             document.addEventListener('DOMContentLoaded', function() {
@@ -801,11 +816,26 @@ def index():
                         </video>
                     </div>
                     <script>
-                        function copySimpleUrl() {
+                        async function copySimpleUrl() {
                             const input = document.getElementById('simpleUrlInput');
-                            input.select();
-                            document.execCommand('copy');
-                            alert('URL copied to clipboard!');
+                            try {
+                                await navigator.clipboard.writeText(input.value);
+                                const toast = document.createElement('div');
+                                toast.style.position = 'fixed';
+                                toast.style.bottom = '20px';
+                                toast.style.left = '50%';
+                                toast.style.transform = 'translateX(-50%)';
+                                toast.style.backgroundColor = '#ffd700';
+                                toast.style.color = '#1a1a1a';
+                                toast.style.padding = '10px 20px';
+                                toast.style.borderRadius = '5px';
+                                toast.style.zIndex = '1000';
+                                toast.textContent = 'URL कॉपी हो गया!';
+                                document.body.appendChild(toast);
+                                setTimeout(() => toast.remove(), 2000);
+                            } catch (err) {
+                                alert('URL कॉपी करने में समस्या हुई!');
+                            }
                         }
 
                         document.addEventListener('DOMContentLoaded', function() {
