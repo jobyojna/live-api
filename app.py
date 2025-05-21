@@ -536,156 +536,202 @@ def process_m3u8():
 @app.route('/')
 def index():
     return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>HLS Stream API</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-            h1 { color: #333; }
-            .tab { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; }
-            .tab button { background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; }
-            .tab button:hover { background-color: #ddd; }
-            .tab button.active { background-color: #ccc; }
-            .tabcontent { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; }
-            form { margin-bottom: 20px; }
-            label { display: block; margin-bottom: 5px; }
-            input[type="text"] { width: 100%; padding: 8px; margin-bottom: 10px; }
-            button { padding: 10px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; }
-            pre { background: #f4f4f4; padding: 10px; overflow: auto; }
-            .result { margin-top: 20px; }
-        </style>
-    </head>
-    <body>
-        <h1>HLS Stream API</h1>
-        
-        <div class="tab">
-            <button class="tablinks active" onclick="openTab(event, 'AdvancedMode')">Advanced Mode</button>
-            <button class="tablinks" onclick="openTab(event, 'SimpleMode')">Simple Mode</button>
-        </div>
-        
-        <div id="AdvancedMode" class="tabcontent" style="display: block;">
-            <h2>Create a Proxy Stream</h2>
-            <p>This mode creates a protected stream that requires a token.</p>
-            <form id="streamForm">
-                <label for="m3u8_url">M3U8 URL:</label>
-                <input type="text" id="m3u8_url" name="m3u8_url" placeholder="Enter M3U8 URL" required>
-                <button type="submit">Create Stream</button>
-            </form>
-            <div id="advancedResult" class="result"></div>
-        </div>
-        
-        <div id="SimpleMode" class="tabcontent">
-            <h2>Process M3U8 URL</h2>
-            <p>This mode generates a direct URL that adds parameters to all segments.</p>
-            <form id="simpleForm">
-                <label for="simple_m3u8_url">M3U8 URL:</label>
-                <input type="text" id="simple_m3u8_url" name="simple_m3u8_url" placeholder="Enter M3U8 URL" required>
-                <button type="submit">Process URL</button>
-            </form>
-            <div id="simpleResult" class="result"></div>
-        </div>
+  <!DOCTYPE html>
+<html>
+<head>
+    <title>HLS Stream API</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #1a1a1a;
+            color: #ffd700;
+        }
+        h1, h2, h3 { 
+            color: #ffd700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        .tab { 
+            overflow: hidden; 
+            border: 1px solid #ffd700; 
+            background-color: #2d2d2d; 
+            border-radius: 5px;
+        }
+        .tab button { 
+            background-color: transparent; 
+            float: left; 
+            border: none; 
+            outline: none; 
+            cursor: pointer; 
+            padding: 14px 16px; 
+            transition: 0.3s; 
+            color: #ffd700;
+            font-weight: bold;
+        }
+        .tab button:hover { 
+            background-color: #ffd700; 
+            color: #1a1a1a;
+        }
+        .tab button.active { 
+            background-color: #ffd700; 
+            color: #1a1a1a;
+        }
+        .tabcontent { 
+            display: none; 
+            padding: 20px; 
+            border: 1px solid #ffd700; 
+            border-top: none; 
+            background-color: #2d2d2d;
+            border-radius: 0 0 5px 5px;
+        }
+        form { 
+            margin-bottom: 20px; 
+            background-color: #333333;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        label { 
+            display: block; 
+            margin-bottom: 5px; 
+            color: #ffd700;
+        }
+        input[type="text"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin-bottom: 15px; 
+            background-color: #1a1a1a;
+            border: 1px solid #ffd700;
+            color: #ffd700;
+            border-radius: 4px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            box-shadow: 0 0 5px #ffd700;
+        }
+        button { 
+            padding: 12px 20px; 
+            background: #ffd700; 
+            color: #1a1a1a; 
+            border: none; 
+            cursor: pointer; 
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            background: #ffed4a;
+            transform: translateY(-2px);
+        }
+        pre { 
+            background: #333333; 
+            padding: 15px; 
+            overflow: auto; 
+            color: #ffd700;
+            border-radius: 4px;
+            border: 1px solid #ffd700;
+        }
+        .result { 
+            margin-top: 20px; 
+            padding: 15px;
+            background-color: #333333;
+            border-radius: 5px;
+        }
+        a {
+            color: #ffd700;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        video {
+            border: 2px solid #ffd700;
+            border-radius: 4px;
+            background-color: #1a1a1a;
+        }
+    </style>
+</head>
+<body>
+    <h1>HLS Stream API</h1>
+    
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event, 'AdvancedMode')">Advanced Mode</button>
+        <button class="tablinks" onclick="openTab(event, 'SimpleMode')">Simple Mode</button>
+    </div>
+    
+    <div id="AdvancedMode" class="tabcontent" style="display: block;">
+        <h2>Create a Proxy Stream</h2>
+        <p>This mode creates a protected stream that requires a token.</p>
+        <form id="streamForm">
+            <label for="m3u8_url">M3U8 URL:</label>
+            <input type="text" id="m3u8_url" name="m3u8_url" placeholder="Enter M3U8 URL" required>
+            <button type="submit">Create Stream</button>
+        </form>
+        <div id="advancedResult" class="result"></div>
+    </div>
+    
+    <div id="SimpleMode" class="tabcontent">
+        <h2>Process M3U8 URL</h2>
+        <p>This mode generates a direct URL that adds parameters to all segments.</p>
+        <form id="simpleForm">
+            <label for="simple_m3u8_url">M3U8 URL:</label>
+            <input type="text" id="simple_m3u8_url" name="simple_m3u8_url" placeholder="Enter M3U8 URL" required>
+            <button type="submit">Process URL</button>
+        </form>
+        <div id="simpleResult" class="result"></div>
+    </div>
 
-        <script>
-            function openTab(evt, tabName) {
-                var i, tabcontent, tablinks;
-                tabcontent = document.getElementsByClassName("tabcontent");
-                for (i = 0; i < tabcontent.length; i++) {
-                    tabcontent[i].style.display = "none";
-                }
-                tablinks = document.getElementsByClassName("tablinks");
-                for (i = 0; i < tablinks.length; i++) {
-                    tablinks[i].className = tablinks[i].className.replace(" active", "");
-                }
-                document.getElementById(tabName).style.display = "block";
-                evt.currentTarget.className += " active";
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
             }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+        
+        document.getElementById('streamForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const m3u8_url = document.getElementById('m3u8_url').value;
             
-            document.getElementById('streamForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const m3u8_url = document.getElementById('m3u8_url').value;
+            try {
+                const response = await fetch('/api/create_stream', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ m3u8_url })
+                });
                 
-                try {
-                    const response = await fetch('/api/create_stream', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ m3u8_url })
-                    });
-                    
-                    const data = await response.json();
-                    const resultDiv = document.getElementById('advancedResult');
-                    
-                    if (response.ok) {
-                        resultDiv.innerHTML = `
-                            <h3>Stream Created</h3>
-                            <p>Token: ${data.token}</p>
-                            <p>Stream ID: ${data.stream_id}</p>
-                            <p>Manifest URL: <a href="${data.manifest_url}" target="_blank">${data.manifest_url}</a></p>
-                            <p>Use this URL in your HLS player.</p>
-                            <h3>Player Test</h3>
-                            <div id="player">
-                                <video id="videoPlayer" controls style="width: 100%;">
-                                    <source src="${data.manifest_url}" type="application/x-mpegURL">
-                                    Your browser does not support the video tag.
-                                </video>
-                            </div>
-                            <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
-                            <script>
-                                document.addEventListener('DOMContentLoaded', function() {
-                                    const video = document.getElementById('videoPlayer');
-                                    const manifestUrl = "${data.manifest_url}";
-                                    
-                                    if (Hls.isSupported()) {
-                                        const hls = new Hls();
-                                        hls.loadSource(manifestUrl);
-                                        hls.attachMedia(video);
-                                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                                            video.play();
-                                        });
-                                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                        video.src = manifestUrl;
-                                        video.addEventListener('loadedmetadata', function() {
-                                            video.play();
-                                        });
-                                    }
-                                });
-                            <\/script>
-                        `;
-                    } else {
-                        resultDiv.innerHTML = `<h3>Error</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
-                    }
-                } catch (error) {
-                    document.getElementById('advancedResult').innerHTML = `<h3>Error</h3><pre>${error}</pre>`;
-                }
-            });
-            
-            document.getElementById('simpleForm').addEventListener('submit', (e) => {
-                e.preventDefault();
-                const m3u8_url = document.getElementById('simple_m3u8_url').value;
+                const data = await response.json();
+                const resultDiv = document.getElementById('advancedResult');
                 
-                if (m3u8_url) {
-                    const encodedUrl = encodeURIComponent(m3u8_url);
-                    const processingUrl = `/process_m3u8?url=${encodedUrl}`;
-                    
-                    document.getElementById('simpleResult').innerHTML = `
-                        <h3>Processed URL</h3>
-                        <p>Use this URL in your HLS player:</p>
-                        <pre>${window.location.origin}${processingUrl}</pre>
-                        <p><a href="${processingUrl}" target="_blank">Test in new tab</a></p>
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <h3>Stream Created</h3>
+                        <p>Token: ${data.token}</p>
+                        <p>Stream ID: ${data.stream_id}</p>
+                        <p>Manifest URL: <a href="${data.manifest_url}" target="_blank">${data.manifest_url}</a></p>
+                        <p>Use this URL in your HLS player.</p>
                         <h3>Player Test</h3>
-                        <div id="simplePlayer">
-                            <video id="simpleVideoPlayer" controls style="width: 100%;">
-                                <source src="${processingUrl}" type="application/x-mpegURL">
+                        <div id="player">
+                            <video id="videoPlayer" controls style="width: 100%;">
+                                <source src="${data.manifest_url}" type="application/x-mpegURL">
                                 Your browser does not support the video tag.
                             </video>
                         </div>
                         <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
                         <script>
                             document.addEventListener('DOMContentLoaded', function() {
-                                const video = document.getElementById('simpleVideoPlayer');
-                                const manifestUrl = "${processingUrl}";
+                                const video = document.getElementById('videoPlayer');
+                                const manifestUrl = "${data.manifest_url}";
                                 
                                 if (Hls.isSupported()) {
                                     const hls = new Hls();
@@ -704,12 +750,62 @@ def index():
                         <\/script>
                     `;
                 } else {
-                    alert('Please enter an M3U8 URL');
+                    resultDiv.innerHTML = `<h3>Error</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
                 }
-            });
-        </script>
-    </body>
-    </html>
+            } catch (error) {
+                document.getElementById('advancedResult').innerHTML = `<h3>Error</h3><pre>${error}</pre>`;
+            }
+        });
+        
+        document.getElementById('simpleForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const m3u8_url = document.getElementById('simple_m3u8_url').value;
+            
+            if (m3u8_url) {
+                const encodedUrl = encodeURIComponent(m3u8_url);
+                const processingUrl = `/process_m3u8?url=${encodedUrl}`;
+                
+                document.getElementById('simpleResult').innerHTML = `
+                    <h3>Processed URL</h3>
+                    <p>Use this URL in your HLS player:</p>
+                    <pre>${window.location.origin}${processingUrl}</pre>
+                    <p><a href="${processingUrl}" target="_blank">Test in new tab</a></p>
+                    <h3>Player Test</h3>
+                    <div id="simplePlayer">
+                        <video id="simpleVideoPlayer" controls style="width: 100%;">
+                            <source src="${processingUrl}" type="application/x-mpegURL">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function() {
+                            const video = document.getElementById('simpleVideoPlayer');
+                            const manifestUrl = "${processingUrl}";
+                            
+                            if (Hls.isSupported()) {
+                                const hls = new Hls();
+                                hls.loadSource(manifestUrl);
+                                hls.attachMedia(video);
+                                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                                    video.play();
+                                });
+                            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                                video.src = manifestUrl;
+                                video.addEventListener('loadedmetadata', function() {
+                                    video.play();
+                                });
+                            }
+                        });
+                    <\/script>
+                `;
+            } else {
+                alert('Please enter an M3U8 URL');
+            }
+        });
+    </script>
+</body>
+</html>
     """
 
 
