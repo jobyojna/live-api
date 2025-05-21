@@ -536,7 +536,7 @@ def process_m3u8():
 @app.route('/')
 def index():
     return """
-  <!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <title>HLS Stream API</title>
@@ -716,10 +716,10 @@ def index():
                 if (response.ok) {
                     resultDiv.innerHTML = `
                         <h3>Stream Created</h3>
-                        <p>Token: ${data.token}</p>
-                        <p>Stream ID: ${data.stream_id}</p>
-                        <p>Manifest URL: <a href="${data.manifest_url}" target="_blank">${data.manifest_url}</a></p>
-                        <p>Use this URL in your HLS player.</p>
+                        <div class="url-container" style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                            <input type="text" value="${data.manifest_url}" id="manifestUrlInput" readonly style="flex: 1;">
+                            <button onclick="copyManifestUrl()" style="white-space: nowrap;">Copy URL</button>
+                        </div>
                         <h3>Player Test</h3>
                         <div id="player">
                             <video id="videoPlayer" controls style="width: 100%;">
@@ -727,25 +727,47 @@ def index():
                                 Your browser does not support the video tag.
                             </video>
                         </div>
-                        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
+                        <link href="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video-js.min.css" rel="stylesheet">
+                        <link href="https://cdn.jsdelivr.net/npm/@videojs/themes@1/dist/fantasy/index.css" rel="stylesheet">
+                        <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"><\/script>
+                        <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.16.2/dist/videojs-http-streaming.min.js"><\/script>
                         <script>
+                            function copyManifestUrl() {
+                                const input = document.getElementById('manifestUrlInput');
+                                input.select();
+                                document.execCommand('copy');
+                                alert('URL copied to clipboard!');
+                            }
+
                             document.addEventListener('DOMContentLoaded', function() {
-                                const video = document.getElementById('videoPlayer');
-                                const manifestUrl = "${data.manifest_url}";
-                                
-                                if (Hls.isSupported()) {
-                                    const hls = new Hls();
-                                    hls.loadSource(manifestUrl);
-                                    hls.attachMedia(video);
-                                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                                        video.play();
-                                    });
-                                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                    video.src = manifestUrl;
-                                    video.addEventListener('loadedmetadata', function() {
-                                        video.play();
-                                    });
-                                }
+                                const player = videojs('videoPlayer', {
+                                    fluid: true,
+                                    controls: true,
+                                    html5: {
+                                        vhs: {
+                                            overrideNative: true
+                                        },
+                                        nativeAudioTracks: false,
+                                        nativeVideoTracks: false
+                                    },
+                                    controlBar: {
+                                        children: [
+                                            'playToggle',
+                                            'volumePanel',
+                                            'currentTimeDisplay',
+                                            'timeDivider',
+                                            'durationDisplay',
+                                            'progressControl',
+                                            'qualitySelector',
+                                            'fullscreenToggle'
+                                        ]
+                                    }
+                                });
+
+                                player.src({
+                                    src: '${data.manifest_url}',
+                                    type: 'application/x-mpegURL'
+                                });
                             });
                         <\/script>
                     `;
@@ -767,35 +789,54 @@ def index():
                 
                 document.getElementById('simpleResult').innerHTML = `
                     <h3>Processed URL</h3>
-                    <p>Use this URL in your HLS player:</p>
-                    <pre>${window.location.origin}${processingUrl}</pre>
-                    <p><a href="${processingUrl}" target="_blank">Test in new tab</a></p>
+                    <div class="url-container" style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                        <input type="text" value="${window.location.origin}${processingUrl}" id="simpleUrlInput" readonly style="flex: 1;">
+                        <button onclick="copySimpleUrl()" style="white-space: nowrap;">Copy URL</button>
+                    </div>
                     <h3>Player Test</h3>
                     <div id="simplePlayer">
-                        <video id="simpleVideoPlayer" controls style="width: 100%;">
+                        <video id="simpleVideoPlayer" class="video-js vjs-theme-fantasy" controls style="width: 100%;">
                             <source src="${processingUrl}" type="application/x-mpegURL">
                             Your browser does not support the video tag.
                         </video>
                     </div>
-                    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"><\/script>
                     <script>
+                        function copySimpleUrl() {
+                            const input = document.getElementById('simpleUrlInput');
+                            input.select();
+                            document.execCommand('copy');
+                            alert('URL copied to clipboard!');
+                        }
+
                         document.addEventListener('DOMContentLoaded', function() {
-                            const video = document.getElementById('simpleVideoPlayer');
-                            const manifestUrl = "${processingUrl}";
-                            
-                            if (Hls.isSupported()) {
-                                const hls = new Hls();
-                                hls.loadSource(manifestUrl);
-                                hls.attachMedia(video);
-                                hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                                    video.play();
-                                });
-                            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                                video.src = manifestUrl;
-                                video.addEventListener('loadedmetadata', function() {
-                                    video.play();
-                                });
-                            }
+                            const player = videojs('simpleVideoPlayer', {
+                                fluid: true,
+                                controls: true,
+                                html5: {
+                                    vhs: {
+                                        overrideNative: true
+                                    },
+                                    nativeAudioTracks: false,
+                                    nativeVideoTracks: false
+                                },
+                                controlBar: {
+                                    children: [
+                                        'playToggle',
+                                        'volumePanel',
+                                        'currentTimeDisplay',
+                                        'timeDivider',
+                                        'durationDisplay',
+                                        'progressControl',
+                                        'qualitySelector',
+                                        'fullscreenToggle'
+                                    ]
+                                }
+                            });
+
+                            player.src({
+                                src: '${processingUrl}',
+                                type: 'application/x-mpegURL'
+                            });
                         });
                     <\/script>
                 `;
